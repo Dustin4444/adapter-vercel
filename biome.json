@@ -1,14 +1,8 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.0.5/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.1.1/schema.json",
   "files": {
     "includes": [
-      "**/*.js",
-      "**/*.jsx",
-      "**/*.ts",
-      "**/*.tsx",
-      "**/*.mts",
-      "**/*.mjs",
-      "**/*.json",
+      "**",
       "!**/node_modules/**",
       "!**/dist/**",
       "!**/.vercel/**",
@@ -17,7 +11,7 @@
       "!**/.turbo/**",
       "!**/.next/**",
       "!**/.env/**",
-      "!target/**",
+      "!**/target/**",
       "!**/tests/fixture/**",
       "!**/tests/errors/**",
       "!**/test/**/*.json"
