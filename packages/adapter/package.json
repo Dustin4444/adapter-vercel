@@ -6,6 +6,9 @@
   "files": [
     "dist"
   ],
+  "repository": {
+    "url": "https://github.com/nextjs/adapter-vercel"
+  },
   "scripts": {
     "build": "rm -rf dist; tsc --noEmit && node --experimental-transform-types build.mts",
     "test": "vitest"
