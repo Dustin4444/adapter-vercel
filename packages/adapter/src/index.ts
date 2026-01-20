@@ -89,22 +89,26 @@ const myAdapter: NextAdapter = {
       ...outputs.appRoutes,
       ...outputs.pages,
       ...outputs.pagesApi,
+      ...outputs.staticFiles,
     ]) {
-      if (output.pathname.endsWith('/_not-found')) {
-        hasNotFoundOutput = true;
-      }
       if (output.pathname.endsWith('/404')) {
+        hasNotFoundOutput = false;
         has404Output = true;
+      }
+      if (!has404Output && output.pathname.endsWith('/_not-found')) {
+        hasNotFoundOutput = true;
       }
       if (output.pathname.endsWith('/500')) {
         has500Output = true;
       }
 
-      if (output.runtime === 'nodejs') {
-        nodeOutputsParentMap.set(output.id, output);
-        nodeOutputs.push(output);
-      } else if (output.runtime === 'edge') {
-        edgeOutputs.push(output);
+      if ('runtime' in output) {
+        if (output.runtime === 'nodejs') {
+          nodeOutputsParentMap.set(output.id, output);
+          nodeOutputs.push(output);
+        } else if (output.runtime === 'edge') {
+          edgeOutputs.push(output);
+        }
       }
     }
 
@@ -193,8 +197,11 @@ const myAdapter: NextAdapter = {
     // handle prerenders (must come after handle node outputs)
     await handlePrerenderOutputs(outputs.prerenders, {
       config,
+      hasAppEntries: outputs.appPages.length > 0,
+      varyHeader: routing.rsc.varyHeader,
       vercelOutputDir,
       nodeOutputsParentMap,
+      rscContentType: routing.rsc.contentTypeHeader,
     });
     const shouldHandleSegmentPrefetches = outputs.appPages.length > 0;
 
