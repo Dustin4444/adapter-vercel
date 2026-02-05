@@ -8,6 +8,7 @@ import type { RouteWithSrc } from '@vercel/routing-utils';
 import { Sema } from 'async-sema';
 import fse from 'fs-extra';
 import type { AdapterOutput, NextConfig } from 'next';
+import type { RoutesManifest } from 'next/dist/build';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
 import { INTERNAL_PAGES } from './constants';
 import type { NextjsParams } from './get-edge-function';
@@ -38,7 +39,7 @@ const copy = async (src: string, dest: string) => {
   await fse.copy(src, dest);
 };
 
-const writeLock = new Map<string, Promise<any>>();
+const writeLock = new Map<string, Promise<void>>();
 
 const writeIfNotExists = async (filePath: string, content: string) => {
   await writeLock.get(filePath);
@@ -161,6 +162,28 @@ export type FuncOutputs = Array<
   | AdapterOutput['MIDDLEWARE']
 >;
 
+/**
+ * Filter `headers` and `deploymentId` out of the routes-manifest.json for deterministic functions.
+ * In minimal mode, they aren't used (the adapter reads them and generates the config.json for
+ * Vercel).
+ */
+async function writeDeterministicRoutesManifest(distDir: string) {
+  const manifest: RoutesManifest = require(
+    path.join(distDir, 'routes-manifest.json')
+  );
+
+  manifest.headers = [];
+  // @ts-expect-error only recently added
+  delete manifest.deploymentId;
+
+  const outputManifestPath = path.join(
+    distDir,
+    'routes-manifest-deterministic.json'
+  );
+  await fs.writeFile(outputManifestPath, JSON.stringify(manifest));
+  return outputManifestPath;
+}
+
 export async function handleNodeOutputs(
   nodeOutputs: FuncOutputs,
   {
@@ -207,6 +230,15 @@ export async function handleNodeOutputs(
     }
   }
 
+  const routesManifestDeterministicRelativePath = path.posix.relative(
+    repoRoot,
+    await writeDeterministicRoutesManifest(distDir)
+  );
+  const routesManifestRelativePath = path.posix.join(
+    path.posix.relative(repoRoot, distDir),
+    'routes-manifest.json'
+  );
+
   await Promise.all(
     nodeOutputs.map(async (output) => {
       await fsSema.acquire();
@@ -239,6 +271,11 @@ export async function handleNodeOutputs(
           files[path.posix.relative(repoRoot, notFoundOutput.filePath)] =
             path.posix.relative(repoRoot, notFoundOutput.filePath);
         }
+      }
+
+      if (files[routesManifestRelativePath]) {
+        files[routesManifestRelativePath] =
+          routesManifestDeterministicRelativePath;
       }
 
       const handlerFilePath = path.join(
