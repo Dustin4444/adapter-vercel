@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
+import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import {
   type FuncOutputs,
   handleEdgeOutputs,
@@ -25,6 +26,22 @@ import { escapeStringRegexp, getImagesConfig } from './utils';
 
 const myAdapter: NextAdapter = {
   name: 'Vercel',
+  modifyConfig(config, ctx) {
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      process.env.VERCEL_IMMUTABLE_STATIC_FILES_ENABLED === '1'
+    ) {
+      config.experimental.supportsImmutableAssets = true;
+    }
+
+    if (process.env.VERCEL_HASH_SALT != null) {
+      config.experimental.outputHashSalt =
+        (config.experimental.outputHashSalt ?? '') +
+        process.env.VERCEL_HASH_SALT;
+    }
+
+    return config;
+  },
   async onBuildComplete({
     routing,
     config,
