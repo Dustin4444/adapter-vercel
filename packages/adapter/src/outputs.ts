@@ -345,8 +345,15 @@ async function getProjectEnvFiles(projectDir: string): Promise<string[]> {
   const envFiles: string[] = [];
   const projectFiles = (await fs.readdir(projectDir).catch(() => [])).sort();
 
+  const productionEnvFiles = new Set([
+    '.env.production.local',
+    '.env.local',
+    '.env.production',
+    '.env',
+  ]);
+
   for (const file of projectFiles) {
-    const isEnv = file === '.env' || file.startsWith('.env.');
+    const isEnv = productionEnvFiles.has(file);
 
     if (!isEnv) {
       continue;
