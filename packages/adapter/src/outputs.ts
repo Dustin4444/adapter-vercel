@@ -15,6 +15,7 @@ import type { NextjsParams } from './get-edge-function';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
 import type { VercelConfig } from './types';
+import { sha256 } from './utils';
 
 /**
  * Type guard to check if a prerender fallback has a filePath.
@@ -234,6 +235,7 @@ type NodeFunctionConfig = Pick<
   filePathMap: Record<string, string>;
   useWebApi?: boolean;
   launcherType: 'Nodejs';
+  fileHashes?: Record<string, string>;
 };
 
 let hasWarnedAboutDotEnv = false;
@@ -337,8 +339,12 @@ async function writeDeterministicRoutesManifest(distDir: string) {
     distDir,
     'routes-manifest-deterministic.json'
   );
-  await fs.writeFile(outputManifestPath, JSON.stringify(manifest));
-  return outputManifestPath;
+  const manifestJson = JSON.stringify(manifest);
+  await fs.writeFile(outputManifestPath, manifestJson);
+  return {
+    routesManifestPath: outputManifestPath,
+    routesManifestHash: sha256(manifestJson),
+  };
 }
 
 async function getProjectEnvFiles(projectDir: string): Promise<string[]> {
@@ -430,10 +436,9 @@ export async function handleNodeOutputs(
     }
   }
 
-  const routesManifestDeterministicRelativePath = path.posix.relative(
-    repoRoot,
-    await writeDeterministicRoutesManifest(distDir)
-  );
+  const { routesManifestPath, routesManifestHash } =
+    await writeDeterministicRoutesManifest(distDir);
+
   const routesManifestRelativePath = path.posix.join(
     path.posix.relative(repoRoot, distDir),
     'routes-manifest.json'
@@ -441,12 +446,16 @@ export async function handleNodeOutputs(
   const envFiles = await getProjectEnvFiles(projectDir);
   const hasProjectEnvFiles = envFiles.length > 0;
   const envFilePathMap: Record<string, string> = {};
+  const envFileHashes: Record<string, string> = {};
   let nextEnvLoaderPathRelativeToProjectDir: string | undefined;
 
   for (const envFile of envFiles) {
     envFilePathMap[
       path.posix.join(path.posix.relative(repoRoot, projectDir), envFile)
     ] = path.posix.relative(repoRoot, path.join(projectDir, envFile));
+    envFileHashes[envFile] = sha256(
+      await fs.readFile(path.join(projectDir, envFile))
+    );
   }
 
   if (hasProjectEnvFiles) {
@@ -460,6 +469,9 @@ export async function handleNodeOutputs(
     const nextEnvLoaderPath = resolveNextEnvLoaderPath(projectDir);
     envFilePathMap[path.posix.relative(repoRoot, nextEnvLoaderPath)] =
       path.posix.relative(repoRoot, nextEnvLoaderPath);
+    envFileHashes[path.posix.relative(repoRoot, nextEnvLoaderPath)] = sha256(
+      await fs.readFile(nextEnvLoaderPath)
+    );
     nextEnvLoaderPathRelativeToProjectDir = path.posix.relative(
       projectDir,
       nextEnvLoaderPath
@@ -477,6 +489,9 @@ export async function handleNodeOutputs(
       await fs.mkdir(functionDir, { recursive: true });
 
       const files: Record<string, string> = {};
+      const filesHashes: Record<string, string> | undefined =
+        // @ts-expect-error not released yet
+        output.assetsHashes;
 
       for (const [relPath, fsPath] of Object.entries(output.assets)) {
         files[relPath] = path.posix.relative(repoRoot, fsPath);
@@ -485,6 +500,9 @@ export async function handleNodeOutputs(
         path.posix.relative(repoRoot, output.filePath);
       if (hasProjectEnvFiles) {
         Object.assign(files, envFilePathMap);
+        if (filesHashes) {
+          Object.assign(filesHashes, envFileHashes);
+        }
       }
 
       // ensure 404 handler is included in function for rendering
@@ -497,15 +515,22 @@ export async function handleNodeOutputs(
             notFoundOutput.assets
           )) {
             files[relPath] = path.posix.relative(repoRoot, fsPath);
+            if (filesHashes) {
+              // @ts-expect-error not released yet
+              filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
+            }
           }
           files[path.posix.relative(repoRoot, notFoundOutput.filePath)] =
             path.posix.relative(repoRoot, notFoundOutput.filePath);
         }
       }
 
-      if (files[routesManifestRelativePath]) {
-        files[routesManifestRelativePath] =
-          routesManifestDeterministicRelativePath;
+      files[routesManifestRelativePath] = path.posix.relative(
+        repoRoot,
+        routesManifestPath
+      );
+      if (filesHashes) {
+        filesHashes[routesManifestRelativePath] = routesManifestHash;
       }
 
       const handlerFilePath = path.join(
@@ -515,16 +540,17 @@ export async function handleNodeOutputs(
       );
 
       await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
-      await writeIfNotExists(
-        handlerFilePath,
-        getHandlerSource({
-          projectRelativeDistDir: path.posix.relative(projectDir, distDir),
-          prerenderFallbackFalseMap,
-          isMiddleware,
-          nextConfig: config,
-          nextEnvLoaderPathRelativeToProjectDir,
-        })
-      );
+      const handlerSource = getHandlerSource({
+        projectRelativeDistDir: path.posix.relative(projectDir, distDir),
+        prerenderFallbackFalseMap,
+        isMiddleware,
+        nextConfig: config,
+        nextEnvLoaderPathRelativeToProjectDir,
+      });
+      await writeIfNotExists(handlerFilePath, handlerSource);
+      if (filesHashes) {
+        filesHashes['___next_launcher.cjs'] = sha256(handlerSource);
+      }
 
       const operationType =
         output.type === AdapterOutputType.APP_PAGE || AdapterOutputType.PAGES
@@ -574,11 +600,12 @@ export async function handleNodeOutputs(
         // middleware handler always expects Request/Response interface
         useWebApi: isMiddleware,
         launcherType: 'Nodejs',
+        fileHashes: filesHashes,
       };
 
       await writeIfNotExists(
         path.join(functionDir, `.vc-config.json`),
-        JSON.stringify(nodeConfig)
+        JSON.stringify(nodeConfig, null, 2)
       );
 
       fsSema.release();
