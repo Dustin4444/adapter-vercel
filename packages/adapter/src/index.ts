@@ -21,12 +21,13 @@ import {
   normalizeNextDataRoutes,
   normalizeRewrites,
 } from './routing';
+import { generateToolbarScript } from './toolbar';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
 const myAdapter: NextAdapter = {
   name: 'Vercel',
-  modifyConfig(config, ctx) {
+  async modifyConfig(config, ctx) {
     if (
       ctx.phase === PHASE_PRODUCTION_BUILD &&
       process.env.VERCEL_IMMUTABLE_STATIC_FILES_ENABLED === '1'
@@ -38,6 +39,32 @@ const myAdapter: NextAdapter = {
       config.experimental.outputHashSalt =
         (config.experimental.outputHashSalt ?? '') +
         process.env.VERCEL_HASH_SALT;
+    }
+
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      process.env.VERCEL_PREVIEW_COMMENTS_ENABLED === '1'
+    ) {
+      // This script has to live inside of the project directory since Turbopack can't read file
+      // files outside of the project directory.
+      const dir = path.join(ctx.projectDir, '.vercel/');
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(dir, 'adapter-toolbar-script.js'),
+        generateToolbarScript(
+          process.env.VERCEL_ENV === 'production',
+          process.env.VERCEL_PREVIEW_COMMENTS_OPT_IN === '1',
+          process.env.VERCEL_SKEW_PROTECTION_ENABLED === '1'
+            ? 'process.env.NEXT_DEPLOYMENT_ID'
+            : // Fallback to burning in the deployment id if skew protection is disabled
+              'process.env.NEXT_PUBLIC_VERCEL_DEPLOYMENT_ID'
+        )
+      );
+
+      config.instrumentationClientInject ??= [];
+      config.instrumentationClientInject.push(
+        `./.vercel/adapter-toolbar-script.js`
+      );
     }
 
     return config;
