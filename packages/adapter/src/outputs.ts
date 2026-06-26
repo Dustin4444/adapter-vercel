@@ -478,6 +478,8 @@ export async function handleNodeOutputs(
     );
   }
 
+  const usesSrcDir = await usesSrcDirectory(projectDir);
+
   await Promise.all(
     nodeOutputs.map(async (output) => {
       await fsSema.acquire();
@@ -560,6 +562,7 @@ export async function handleNodeOutputs(
         workPath: projectDir,
         page: output.sourcePage,
         pageExtensions: config.pageExtensions || [],
+        usesSrcDir,
       });
       const vercelConfigOpts = await getLambdaOptionsFromFunction({
         sourceFile,
@@ -1008,52 +1011,36 @@ export async function handleMiddleware(
   return routes;
 }
 
-// We only need to compute this once per build
-let _usesSrcCache: boolean | undefined;
-
 async function usesSrcDirectory(workPath: string): Promise<boolean> {
-  if (_usesSrcCache === undefined) {
-    const sourcePages = path.join(workPath, 'src', 'pages');
+  for (const dir of [
+    path.join(workPath, 'src', 'pages'),
+    path.join(workPath, 'src', 'app'),
+  ]) {
     try {
-      if ((await fs.stat(sourcePages)).isDirectory()) {
-        _usesSrcCache = true;
+      if ((await fs.stat(dir)).isDirectory()) {
+        return true;
       }
-    } catch (_err) {
-      _usesSrcCache = false;
-    }
+    } catch (_err) {}
   }
 
-  if (_usesSrcCache === undefined) {
-    const sourceAppdir = path.join(workPath, 'src', 'app');
-    try {
-      if ((await fs.stat(sourceAppdir)).isDirectory()) {
-        _usesSrcCache = true;
-      }
-    } catch (_err) {
-      _usesSrcCache = false;
-    }
-  }
-
-  if (_usesSrcCache === undefined) {
-    _usesSrcCache = false;
-  }
-  return _usesSrcCache;
+  return false;
 }
 
 function isDirectory(path: string) {
-  return fse.existsSync(path) && fse.lstatSync(path).isDirectory();
+  return fse.lstatSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
 }
 
 async function getSourceFilePathFromPage({
   workPath,
   page,
   pageExtensions,
+  usesSrcDir,
 }: {
   workPath: string;
   page: string;
   pageExtensions?: ReadonlyArray<string>;
+  usesSrcDir: boolean;
 }) {
-  const usesSrcDir = await usesSrcDirectory(workPath);
   const extensionsToTry = pageExtensions || ['js', 'jsx', 'ts', 'tsx'];
 
   for (const pageType of [
