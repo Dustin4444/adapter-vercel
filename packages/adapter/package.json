@@ -30,7 +30,7 @@
     "next": "16.4.0-canary.38",
     "picomatch": "4.0.1",
     "source-map": "0.7.4",
-    "vitest": "3.2.7",
+    "vitest": "4.1.11",
     "webpack-sources": "3.2.3"
   },
   "engines": {
